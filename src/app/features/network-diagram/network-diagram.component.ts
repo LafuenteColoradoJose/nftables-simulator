@@ -1,5 +1,5 @@
 import { Component, signal, WritableSignal, computed, inject, DestroyRef } from '@angular/core';
-import anime from 'animejs';
+import { animate, svg } from 'animejs';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
 import { AnimationBusService, PacketAnimation } from '../../core/services/animation-bus.service';
@@ -395,55 +395,46 @@ export class NetworkDiagramComponent {
   /** Motor visual superrobusto a 60fps usando anime.js y path real inyectado en DOM */
   private runAnimeJs(anim: any) {
     // Referencias a los contenedores
-    const pathEl = document.getElementById('path-' + anim.id) as SVGPathElement;
+    const pathEl = document.getElementById('path-' + anim.id) as unknown as SVGPathElement;
     const packetEl = document.getElementById('packet-' + anim.id);
     const explodeEl = document.getElementById('explode-' + anim.id);
     const crossEl = document.getElementById('cross-' + anim.id);
 
     if (packetEl && pathEl) {
-      // Calcular duración real basada en la longitud física del path inyectado en DOM
-      let len = 500;
-      try { len = pathEl.getTotalLength(); } catch(e) {}
-      const travelMs = Math.max(anim.isDrop ? 600 : 1200, Math.floor(len * 2.5));
-
+      const motionPath = svg.createMotionPath(pathEl);
       // Configurarlo visible antes de arrancar
       packetEl.style.opacity = '1';
 
-      const animePath = anime.path(pathEl);
-
-      anime({
-        targets: packetEl,
-        translateX: animePath('x'),
-        translateY: animePath('y'),
-        easing: 'linear',
-        duration: travelMs,
-        complete: () => {
+      animate(packetEl, {
+        translateX: motionPath.translateX,
+        translateY: motionPath.translateY,
+        ease: 'linear',
+        duration: anim.travelMs,
+        onComplete: () => {
           packetEl.style.opacity = '0'; // Se detiene
           
           if (explodeEl) {
             explodeEl.style.opacity = '1';
-            anime({
-              targets: explodeEl,
+            animate(explodeEl, {
               r: [5, 40],
               opacity: [1, 0],
               strokeWidth: [4, 1],
-              easing: 'easeOutQuart',
+              ease: 'outQuart',
               duration: 500
             });
           }
 
           if (anim.isDrop && crossEl) {
             crossEl.style.opacity = '1';
-            anime({
-              targets: crossEl,
+            animate(crossEl, {
               scale: [0.2, 1.6],
               opacity: [1, 0],
-              easing: 'easeOutQuart',
+              ease: 'outQuart',
               duration: 500
             });
           }
 
-          // Eliminar las marcas residuales totalmente del render árbol 
+          // Eliminar las marcas residuales totalmente del render árbol tras la evaporación de frames visuales
           setTimeout(() => {
             this.activeAnimations.update(arr => arr.filter(a => a.id !== anim.id));
           }, 800);
