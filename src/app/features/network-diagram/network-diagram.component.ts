@@ -1,4 +1,5 @@
 import { Component, signal, WritableSignal, computed, inject, DestroyRef } from '@angular/core';
+import anime from 'animejs';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
 import { AnimationBusService, PacketAnimation } from '../../core/services/animation-bus.service';
@@ -176,43 +177,19 @@ interface NodePosition {
           <text x="515" y="367" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="var(--font-mono)">.100.3</text>
           <text x="515" y="381" text-anchor="middle" fill="#64748b" font-size="7" font-family="var(--font-mono)">Usuario</text>
         </g>
-        <style>
-          .moving-packet {
-            stroke-dasharray: 8 2000;
-            fill: none;
-            stroke-width: 8;
-            stroke-linecap: round;
-            transition-property: stroke-dashoffset;
-            transition-timing-function: linear;
-          }
-          @keyframes explodeAnim {
-            0% { r: 5px; opacity: 1; stroke-width: 4px; }
-            100% { r: 40px; opacity: 0; stroke-width: 1px; }
-          }
-          @keyframes crossAnim {
-            0% { opacity: 1; transform: scale(0.2); }
-            100% { opacity: 0; transform: scale(1.6); }
-          }
-        </style>
-
-        <!-- ═══ ANIMACIONES DE PAQUETES ═══ -->
+        <!-- ═══ ANIMACIONES DE PAQUETES (Controlado directamente con Anime.js) ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
           <g>
-            <!-- Paquete en movimiento usando transición CSS pura y robusta -->
-            <path [attr.d]="anim.path" [attr.stroke]="anim.color"
-                  class="moving-packet"
-                  [style.stroke-dashoffset.px]="anim.offset()"
-                  [style.transition-duration.ms]="anim.travelMs" />
+            <!-- Paquete en movimiento renderizado en 0,0 y manejado en transform nativamente por GPU a 60fps -->
+            <circle [attr.id]="'packet-' + anim.id" r="7" [attr.fill]="anim.color" style="opacity: 0;" />
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
-            <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color"
-                    style="opacity: 0; animation: explodeAnim 500ms ease-out forwards;"
-                    [style.animation-delay.ms]="anim.travelMs" />
+            <circle [attr.id]="'explode-' + anim.id" [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" style="opacity: 0;" />
 
             @if (anim.isDrop) {
                <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
-               <g [style.transform]="'translate(' + anim.targetX + 'px, ' + anim.targetY + 'px)'">
-                 <g style="opacity: 0; animation: crossAnim 500ms ease-out forwards;" [style.animation-delay.ms]="anim.travelMs">
+               <g [attr.transform]="'translate(' + anim.targetX + ',' + anim.targetY + ')'">
+                 <g [attr.id]="'cross-' + anim.id" style="opacity: 0;">
                    <line x1="-15" y1="-15" x2="15" y2="15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
                    <line x1="-15" y1="15" x2="15" y2="-15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
                  </g>
@@ -373,22 +350,22 @@ export class NetworkDiagramComponent {
     this.selectedNode.set(this.selectedNode() === id ? null : id);
   }
 
-  /** Función para inyectar una nueva animación en el ecosistema SVG usando CSS puro */
+  /** Función para inyectar una nueva animación en el ecosistema SVG usando anime.js */
   private triggerAnimation(anim: PacketAnimation) {
     const isDrop = anim.verdict === 'drop' || anim.verdict === 'reject';
     const color = anim.verdict === 'accept' ? '#34d399' : '#f87171'; // Verde si accept, Rojo si drop/reject
     
-    let path = this.getHostToRouterPath(anim.source);
+    let pathString = this.getHostToRouterPath(anim.source);
     
     // Si isDrop es falso y dest no es router, agregamos el path hacia el destino
     if (!isDrop && anim.dest !== 'router') {
       const destPath = this.getRouterToHostPath(anim.dest);
       // Evitamos el salto borrando el move inicial del segundo path
-      path += ' ' + destPath.replace('M 300 125 ', '');
+      pathString += ' ' + destPath.replace('M 300 125 ', '');
     }
 
     // Extraer coordenadas finales directamente del final del string del path!
-    const parts = path.trim().split(/\s+/);
+    const parts = pathString.trim().split(/\s+/);
     const targetY = parseFloat(parts.pop() || '0');
     const targetX = parseFloat(parts.pop() || '0');
 
@@ -396,27 +373,78 @@ export class NetworkDiagramComponent {
     let pathLength = 500;
     try {
       const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      tempPath.setAttribute('d', path);
+      tempPath.setAttribute('d', pathString);
       pathLength = tempPath.getTotalLength();
     } catch(e) {}
 
     const travelMs = Math.max(isDrop ? 600 : 1200, Math.floor(pathLength * 2.5));
-    const offsetSig = signal(0); // Offset 0 coloca el dash al principio del svg path
     
-    const newAnim = { id: anim.id, path, color, isDrop, travelMs, targetX, targetY, offset: offsetSig };
+    const newAnim = { id: anim.id, path: pathString, color, isDrop, travelMs, targetX, targetY, offset: signal(0) };
     
-    // Añadir al SVG
+    // Añadir al SVG (Angular dibujará el circulo con su atributo DOM id correspondiente)
     this.activeAnimations.update(arr => [...arr, newAnim]);
 
-    // Forzar el repintado asíncrono y luego ejecutar el cambio del signal que lanzará la transition CSS
+    // Forzar un tick de render en el DOM para poder obtener los nodos exactos y aplicarles animeJS con máxima compatibilidad
     setTimeout(() => {
-      offsetSig.set(-pathLength);
+      this.runAnimeJs(newAnim);
     }, 50);
+  }
 
-    // Limpiarlo del DOM después de que termine todo (viaje + explosión)
-    setTimeout(() => {
-      this.activeAnimations.update(arr => arr.filter(a => a.id !== newAnim.id));
-    }, travelMs + 700);
+  /** Motor visual superrobusto a 60fps usando anime.js y modificando propiedades básicas de DOM */
+  private runAnimeJs(anim: any) {
+    // Referencias a los contenedores
+    const packetEl = document.getElementById('packet-' + anim.id);
+    const explodeEl = document.getElementById('explode-' + anim.id);
+    const crossEl = document.getElementById('cross-' + anim.id);
+
+    // Path temporal que dictará la trayectoria punto por punto
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', anim.path);
+    const animePath = anime.path(pathEl);
+
+    if (packetEl) {
+      // Configurarlo visible antes de arrancar
+      packetEl.style.opacity = '1';
+
+      anime({
+        targets: packetEl,
+        translateX: animePath('x'),
+        translateY: animePath('y'),
+        easing: 'linear',
+        duration: anim.travelMs,
+        complete: () => {
+          packetEl.style.opacity = '0'; // Se detiene
+          
+          if (explodeEl) {
+            explodeEl.style.opacity = '1';
+            anime({
+              targets: explodeEl,
+              r: [5, 40],
+              opacity: [1, 0],
+              strokeWidth: [4, 1],
+              easing: 'easeOutQuart',
+              duration: 500
+            });
+          }
+
+          if (anim.isDrop && crossEl) {
+            crossEl.style.opacity = '1';
+            anime({
+              targets: crossEl,
+              scale: [0.2, 1.6],
+              opacity: [1, 0],
+              easing: 'easeOutQuart',
+              duration: 500
+            });
+          }
+
+          // Eliminar las marcas residuales totalmente del render árbol tras la evaporación de frames visuales
+          setTimeout(() => {
+            this.activeAnimations.update(arr => arr.filter(a => a.id !== anim.id));
+          }, 800);
+        }
+      });
+    }
   }
 
   private getHostToRouterPath(host: string): string {
