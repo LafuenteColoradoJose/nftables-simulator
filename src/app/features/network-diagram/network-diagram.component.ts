@@ -1,4 +1,4 @@
-import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
+import { Component, signal, WritableSignal, computed, inject, DestroyRef } from '@angular/core';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
 import { AnimationBusService, PacketAnimation } from '../../core/services/animation-bus.service';
@@ -178,13 +178,12 @@ interface NodePosition {
         </g>
         <style>
           .moving-packet {
-            animation: moveAnim linear forwards;
-            /* Se evita usar offset-rotate auto para círculos, ya que no hace falta y puede causar glitches */
-          }
-          @keyframes moveAnim {
-            0% { offset-distance: 0%; opacity: 1; }
-            95% { offset-distance: 100%; opacity: 1; }
-            100% { offset-distance: 100%; opacity: 0; }
+            stroke-dasharray: 8 2000;
+            fill: none;
+            stroke-width: 8;
+            stroke-linecap: round;
+            transition-property: stroke-dashoffset;
+            transition-timing-function: linear;
           }
           @keyframes explodeAnim {
             0% { r: 5px; opacity: 1; stroke-width: 4px; }
@@ -199,11 +198,11 @@ interface NodePosition {
         <!-- ═══ ANIMACIONES DE PAQUETES ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
           <g>
-            <!-- Paquete en movimiento usando CSS offset-path -->
-            <circle r="7" [attr.fill]="anim.color"
-                    class="moving-packet"
-                    [style.offset-path]="'path(\\'' + anim.path + '\\')'"
-                    [style.animation-duration.ms]="anim.travelMs" />
+            <!-- Paquete en movimiento usando transición CSS pura y robusta -->
+            <path [attr.d]="anim.path" [attr.stroke]="anim.color"
+                  class="moving-packet"
+                  [style.stroke-dashoffset.px]="anim.offset()"
+                  [style.transition-duration.ms]="anim.travelMs" />
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
             <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color"
@@ -313,7 +312,8 @@ export class NetworkDiagramComponent {
     isDrop: boolean,
     travelMs: number,
     targetX: number,
-    targetY: number
+    targetY: number,
+    offset: WritableSignal<number>
   }[]>([]);
 
   private animationBus = inject(AnimationBusService);
@@ -377,7 +377,6 @@ export class NetworkDiagramComponent {
   private triggerAnimation(anim: PacketAnimation) {
     const isDrop = anim.verdict === 'drop' || anim.verdict === 'reject';
     const color = anim.verdict === 'accept' ? '#34d399' : '#f87171'; // Verde si accept, Rojo si drop/reject
-    const travelMs = isDrop ? 600 : 1200; // Cae rápido si es router, tarda si viaja
     
     let path = this.getHostToRouterPath(anim.source);
     
@@ -393,10 +392,26 @@ export class NetworkDiagramComponent {
     const targetY = parseFloat(parts.pop() || '0');
     const targetX = parseFloat(parts.pop() || '0');
 
-    const newAnim = { id: anim.id, path, color, isDrop, travelMs, targetX, targetY };
+    // Calcular longitud exacta del path
+    let pathLength = 500;
+    try {
+      const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      tempPath.setAttribute('d', path);
+      pathLength = tempPath.getTotalLength();
+    } catch(e) {}
+
+    const travelMs = Math.max(isDrop ? 600 : 1200, Math.floor(pathLength * 2.5));
+    const offsetSig = signal(0); // Offset 0 coloca el dash al principio del svg path
+    
+    const newAnim = { id: anim.id, path, color, isDrop, travelMs, targetX, targetY, offset: offsetSig };
     
     // Añadir al SVG
     this.activeAnimations.update(arr => [...arr, newAnim]);
+
+    // Forzar el repintado asíncrono y luego ejecutar el cambio del signal que lanzará la transition CSS
+    setTimeout(() => {
+      offsetSig.set(-pathLength);
+    }, 50);
 
     // Limpiarlo del DOM después de que termine todo (viaje + explosión)
     setTimeout(() => {
