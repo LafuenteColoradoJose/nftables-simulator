@@ -1,12 +1,169 @@
-import { Component, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { Component, signal, viewChild, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { NavbarComponent } from './layout/navbar.component';
+import { NetworkDiagramComponent } from './features/network-diagram/network-diagram.component';
+import { RuleEditorComponent } from './features/rule-editor/rule-editor.component';
+import { PacketTesterComponent, PacketConfig } from './features/packet-tester/packet-tester.component';
+import { ResultLogComponent, LogEntry } from './features/result-log/result-log.component';
+import { ReferenceSidebarComponent } from './layout/reference-sidebar.component';
+import { NETWORK_HOSTS } from './core/data/topology.data';
+import { NftablesParserService } from './core/services/nftables-parser.service';
+import { SimulationEngineService } from './core/services/simulation-engine.service';
+import { SimulatedPacket } from './core/models/nftables.model';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
-  templateUrl: './app.html',
-  styleUrl: './app.css'
+  imports: [
+    FormsModule,
+    NavbarComponent,
+    NetworkDiagramComponent,
+    RuleEditorComponent,
+    PacketTesterComponent,
+    ResultLogComponent,
+    ReferenceSidebarComponent,
+  ],
+  template: `
+    <div class="flex flex-col h-dvh overflow-hidden bg-bg-primary">
+      <!-- Navbar -->
+      <app-navbar
+        (referenceClick)="toggleReference()"
+        (challengesClick)="toggleChallenges()"
+        (resetClick)="resetSimulator()"
+      />
+
+      <!-- Contenido principal -->
+      <div class="flex flex-1 overflow-hidden">
+        <!-- Área principal (3 paneles) -->
+        <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+          <!-- Fila superior: Diagrama de red -->
+          <section class="flex-1 min-h-0 border-b border-border-default">
+            <app-network-diagram />
+          </section>
+
+          <!-- Fila inferior: Editor + Tester + Log -->
+          <section class="h-[45%] flex min-h-0 overflow-hidden">
+            <!-- Editor de reglas -->
+            <div class="flex-1 min-w-0 border-r border-border-default">
+              <app-rule-editor [(rules)]="editorContent" (applyRules)="onApplyRules($event)" />
+            </div>
+
+            <!-- Tester de paquetes -->
+            <div class="w-56 shrink-0 border-r border-border-default">
+              <app-packet-tester (packetLaunched)="onPacketLaunched($event)" />
+            </div>
+
+            <!-- Log de resultados -->
+            <div class="w-72 shrink-0">
+              <app-result-log />
+            </div>
+          </section>
+        </main>
+
+        <!-- Sidebar: Referencia rápida -->
+        @if (showReference()) {
+          <div class="w-72 shrink-0 overflow-hidden">
+            <app-reference-sidebar />
+          </div>
+        }
+      </div>
+    </div>
+  `,
+  styles: `
+    :host {
+      display: block;
+      height: 100dvh;
+    }
+  `,
 })
 export class App {
-  protected readonly title = signal('nftables');
+  /** Estado global de la UI */
+  protected readonly showReference = signal(true);
+  protected readonly showChallenges = signal(false);
+  protected readonly editorContent = signal('');
+
+  /** Servicios de Simulación */
+  private readonly parser = inject(NftablesParserService);
+  private readonly engine = inject(SimulationEngineService);
+
+  /** Referencias a componentes hijos */
+  private readonly resultLog = viewChild(ResultLogComponent);
+
+  /** Acciones de la navbar */
+  protected toggleReference(): void {
+    this.showReference.update(v => !v);
+  }
+
+  protected toggleChallenges(): void {
+    this.showChallenges.update(v => !v);
+  }
+
+  protected resetSimulator(): void {
+    this.editorContent.set('');
+    this.resultLog()?.clearLog();
+  }
+
+  /** Aplicar reglas del editor */
+  protected onApplyRules(rules: string): void {
+    const parseResult = this.parser.parseRuleset(rules);
+    
+    if (parseResult.success) {
+      let msg = 'Reglas cargadas correctamente.';
+      if (parseResult.warnings.length > 0) {
+        msg += ` (${parseResult.warnings.length} warnings. Ver consola)`;
+        console.warn('Warnings de parseo:', parseResult.warnings);
+      }
+      this.resultLog()?.addEntry({
+        timestamp: new Date().toLocaleTimeString('es-ES'),
+        source: 'sistema', destination: 'router', protocol: 'n/a', port: null,
+        result: 'accept', matchedRule: msg, chain: 'nft-parser'
+      });
+    } else {
+      console.error('Errores en reglas:', parseResult.errors);
+      this.resultLog()?.addEntry({
+        timestamp: new Date().toLocaleTimeString('es-ES'),
+        source: 'sistema', destination: 'router', protocol: 'n/a', port: null,
+        result: 'reject', matchedRule: `Error: ${parseResult.errors[0]}`, chain: 'nft-parser'
+      });
+    }
+  }
+
+  /** Lanzar un paquete de prueba */
+  protected onPacketLaunched(packet: PacketConfig): void {
+    const simPacket: SimulatedPacket = {
+      sourceIp: packet.source,
+      sourceInterface: null,
+      destIp: packet.destination,
+      destInterface: null,
+      protocol: packet.protocol,
+      destPort: packet.destPort,
+      connState: packet.connState
+    };
+
+    const evalResult = this.engine.evaluatePacket(simPacket);
+    
+    // Para logs en consola
+    console.log(`[TEST] ${packet.source} -> ${packet.destination} (${packet.protocol}:${packet.destPort})`);
+    evalResult.logs.forEach(l => console.log(l));
+
+    const sourceHost = packet.source === 'internet'
+      ? 'Internet'
+      : NETWORK_HOSTS.find(h => h.id === packet.source)?.ip ?? packet.source;
+
+    const destHost = packet.destination === 'internet'
+      ? 'Internet'
+      : NETWORK_HOSTS.find(h => h.id === packet.destination)?.ip ?? packet.destination;
+
+    const entry: LogEntry = {
+      timestamp: new Date().toLocaleTimeString('es-ES'),
+      source: sourceHost,
+      destination: destHost,
+      protocol: packet.protocol,
+      port: packet.protocol !== 'icmp' ? packet.destPort : null,
+      result: evalResult.finalVerdict as any,
+      matchedRule: evalResult.matchedRule ? `Regla id ${evalResult.matchedRule.id}` : 'Política por defecto',
+      chain: evalResult.chainEvaluated || 'routing',
+    };
+
+    this.resultLog()?.addEntry(entry);
+  }
 }
