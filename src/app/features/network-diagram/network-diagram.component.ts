@@ -177,14 +177,14 @@ interface NodePosition {
           <text x="515" y="381" text-anchor="middle" fill="#64748b" font-size="7" font-family="var(--font-mono)">Usuario</text>
         </g>
         <style>
-          .trace-packet {
-            stroke-dasharray: 4 1500;
-            animation: tracePath linear both;
+          .moving-packet {
+            animation: moveAnim linear forwards;
+            /* Se evita usar offset-rotate auto para círculos, ya que no hace falta y puede causar glitches */
           }
-          @keyframes tracePath {
-            0% { stroke-dashoffset: 0; opacity: 1; }
-            95% { stroke-dashoffset: -100; opacity: 1; }
-            100% { stroke-dashoffset: -100; opacity: 0; }
+          @keyframes moveAnim {
+            0% { offset-distance: 0%; opacity: 1; }
+            95% { offset-distance: 100%; opacity: 1; }
+            100% { offset-distance: 100%; opacity: 0; }
           }
           @keyframes explodeAnim {
             0% { r: 5px; opacity: 1; stroke-width: 4px; }
@@ -199,9 +199,11 @@ interface NodePosition {
         <!-- ═══ ANIMACIONES DE PAQUETES ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
           <g>
-            <!-- Paquete en movimiento -->
-            <path [attr.d]="anim.path" pathLength="100" fill="none" [attr.stroke]="anim.color" stroke-width="8" stroke-linecap="round"
-                  class="trace-packet" [style.animation-duration.ms]="anim.travelMs" />
+            <!-- Paquete en movimiento usando CSS offset-path -->
+            <circle r="7" [attr.fill]="anim.color"
+                    class="moving-packet"
+                    [style.offset-path]="'path(\\'' + anim.path + '\\')'"
+                    [style.animation-duration.ms]="anim.travelMs" />
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
             <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color"
