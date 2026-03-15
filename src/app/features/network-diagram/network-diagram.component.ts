@@ -1,5 +1,4 @@
 import { Component, signal, WritableSignal, computed, inject, DestroyRef } from '@angular/core';
-import { animate, svg } from 'animejs';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
 import { AnimationBusService, PacketAnimation } from '../../core/services/animation-bus.service';
@@ -177,25 +176,82 @@ interface NodePosition {
           <text x="515" y="367" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="var(--font-mono)">.100.3</text>
           <text x="515" y="381" text-anchor="middle" fill="#64748b" font-size="7" font-family="var(--font-mono)">Usuario</text>
         </g>
-        <!-- ═══ ANIMACIONES DE PAQUETES (Controlado directamente con Anime.js) ═══ -->
+        <!-- ═══ ANIMACIONES DE PAQUETES (SVG SMIL explícito para máxima compatibilidad SPA) ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
           <g>
-            <!-- Ruta invisible en el DOM necesaria para que anime.js mida la longitud y coordenads exactas -->
-            <path [attr.id]="'path-' + anim.id" [attr.d]="anim.path" fill="none" stroke="none" />
-
-            <!-- Paquete en movimiento renderizado en 0,0 y manejado en transform nativamente por GPU a 60fps -->
-            <circle [attr.id]="'packet-' + anim.id" r="7" [attr.fill]="anim.color" style="opacity: 0; pointer-events: none;" />
+            <!-- Paquete en movimiento nativo SVG dictado por coordenadas -->
+            <circle [attr.id]="'packet-' + anim.id" cx="0" cy="0" r="7" [attr.fill]="anim.color" style="opacity: 0; pointer-events: none;">
+              <animateMotion 
+                [attr.id]="'motion-' + anim.id"
+                [attr.path]="anim.path" 
+                [attr.dur]="anim.travelMs + 'ms'" 
+                begin="indefinite"
+                fill="freeze"
+                calcMode="linear"
+              />
+              <animate 
+                [attr.id]="'fade-' + anim.id"
+                attributeName="opacity" 
+                values="1;1;0" 
+                keyTimes="0;0.95;1" 
+                [attr.dur]="anim.travelMs + 'ms'" 
+                begin="indefinite"
+                fill="freeze" 
+              />
+            </circle>
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
-            <circle [attr.id]="'explode-' + anim.id" [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" style="opacity: 0; pointer-events: none;" />
+            <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" style="opacity: 0; pointer-events: none;">
+              <animate 
+                [attr.id]="'explodeFade-' + anim.id"
+                attributeName="opacity" 
+                values="0;1;0" 
+                keyTimes="0;0.1;1" 
+                dur="500ms" 
+                begin="indefinite"
+                fill="freeze" 
+              />
+              <animate 
+                [attr.id]="'explodeRadius-' + anim.id"
+                attributeName="r" 
+                values="5;40" 
+                dur="500ms" 
+                begin="indefinite"
+                fill="freeze" 
+              />
+              <animate 
+                [attr.id]="'explodeStroke-' + anim.id"
+                attributeName="stroke-width" 
+                values="4;1" 
+                dur="500ms" 
+                begin="indefinite"
+                fill="freeze" 
+              />
+            </circle>
 
             @if (anim.isDrop) {
                <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
-               <g [attr.transform]="'translate(' + anim.targetX + ',' + anim.targetY + ')'">
-                 <g [attr.id]="'cross-' + anim.id" style="opacity: 0;">
-                   <line x1="-15" y1="-15" x2="15" y2="15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
-                   <line x1="-15" y1="15" x2="15" y2="-15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
-                 </g>
+               <g [attr.transform]="'translate(' + anim.targetX + ',' + anim.targetY + ')'" style="opacity: 0; pointer-events: none;">
+                 <animate 
+                   [attr.id]="'crossFade-' + anim.id"
+                   attributeName="opacity" 
+                   values="0;1;0" 
+                   keyTimes="0;0.1;1" 
+                   dur="500ms" 
+                   begin="indefinite"
+                   fill="freeze" 
+                 />
+                 <animateTransform 
+                   [attr.id]="'crossScale-' + anim.id"
+                   attributeName="transform" 
+                   type="scale" 
+                   values="0.2;1.6" 
+                   dur="500ms" 
+                   begin="indefinite"
+                   fill="freeze" 
+                 />
+                 <line x1="-15" y1="-15" x2="15" y2="15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
+                 <line x1="-15" y1="15" x2="15" y2="-15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
                </g>
             }
           </g>
@@ -290,9 +346,9 @@ export class NetworkDiagramComponent {
     path: string,
     color: string,
     isDrop: boolean,
+    travelMs: number,
     targetX: number,
     targetY: number,
-    offset: WritableSignal<number>
   }[]>([]);
 
   private animationBus = inject(AnimationBusService);
@@ -371,76 +427,60 @@ export class NetworkDiagramComponent {
     const targetY = parseFloat(parts.pop() || '0');
     const targetX = parseFloat(parts.pop() || '0');
 
-    // Usar un string de ID amigable sin decimales (anim.id actual puede traer decimales en math.random)
-    const animId = `anim_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+    // Calcular longitud exacta
+    let pathLength = 500;
+    try {
+      const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      tempPath.setAttribute('d', pathString);
+      pathLength = tempPath.getTotalLength();
+    } catch(e) {}
 
-    const newAnim = { id: animId, path: pathString, color, isDrop, targetX, targetY, offset: signal(0) };
+    const travelMs = Math.max(isDrop ? 600 : 1200, Math.floor(pathLength * 2.5));
+
+    // Generar ID único
+    const animId = `anim_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+    const newAnim = { id: animId, path: pathString, color, isDrop, travelMs, targetX, targetY };
     
-    // Añadir al SVG (Angular dibujará el circulo con su atributo DOM id correspondiente)
+    // Inyectar en el array
     this.activeAnimations.update(arr => [...arr, newAnim]);
 
-    // Usar un bucle rápido para esperar a que Angular inyecte los elementos en el DOM real
+    // Bucle para esperar que Angular inyecte las etiquetas SVG <animateMotion> y ejecutarlas a demanda (beginElement)
     let retries = 0;
-    const attemptRender = () => {
-      if (document.getElementById('path-' + animId)) {
-        this.runAnimeJs(newAnim);
-      } else if (retries < 10) {
+    const attemptStart = () => {
+      const motionEl = document.getElementById('motion-' + animId) as any;
+      if (motionEl && typeof motionEl.beginElement === 'function') {
+        const fadeEl = document.getElementById('fade-' + animId) as any;
+        motionEl.beginElement();
+        if (fadeEl) fadeEl.beginElement();
+
+        // Limpiar el DOM tras terminar todo (viaje + explosion)
+        setTimeout(() => {
+          this.activeAnimations.update(arr => arr.filter(a => a.id !== animId));
+        }, travelMs + 700);
+
+        // Agendar las explosiones si toca
+        setTimeout(() => {
+          const expFade = document.getElementById('explodeFade-' + animId) as any;
+          const expRad = document.getElementById('explodeRadius-' + animId) as any;
+          const expStroke = document.getElementById('explodeStroke-' + animId) as any;
+          if (expFade) expFade.beginElement();
+          if (expRad) expRad.beginElement();
+          if (expStroke) expStroke.beginElement();
+          
+          if (isDrop) {
+            const crossFade = document.getElementById('crossFade-' + animId) as any;
+            const crossScale = document.getElementById('crossScale-' + animId) as any;
+            if (crossFade) crossFade.beginElement();
+            if (crossScale) crossScale.beginElement();
+          }
+        }, travelMs);
+
+      } else if (retries < 20) {
         retries++;
-        requestAnimationFrame(attemptRender);
+        requestAnimationFrame(attemptStart);
       }
     };
-    requestAnimationFrame(attemptRender);
-  }
-
-  /** Motor visual superrobusto a 60fps usando anime.js y path real inyectado en DOM */
-  private runAnimeJs(anim: any) {
-    // Referencias a los contenedores
-    const pathEl = document.getElementById('path-' + anim.id) as unknown as SVGPathElement;
-    const packetEl = document.getElementById('packet-' + anim.id);
-    const explodeEl = document.getElementById('explode-' + anim.id);
-    const crossEl = document.getElementById('cross-' + anim.id);
-
-    if (packetEl && pathEl) {
-      const motionPath = svg.createMotionPath(pathEl);
-      // Configurarlo visible antes de arrancar
-      packetEl.style.opacity = '1';
-
-      animate(packetEl, {
-        translateX: motionPath.translateX,
-        translateY: motionPath.translateY,
-        ease: 'linear',
-        duration: anim.travelMs,
-        onComplete: () => {
-          packetEl.style.opacity = '0'; // Se detiene
-          
-          if (explodeEl) {
-            explodeEl.style.opacity = '1';
-            animate(explodeEl, {
-              r: [5, 40],
-              opacity: [1, 0],
-              strokeWidth: [4, 1],
-              ease: 'outQuart',
-              duration: 500
-            });
-          }
-
-          if (anim.isDrop && crossEl) {
-            crossEl.style.opacity = '1';
-            animate(crossEl, {
-              scale: [0.2, 1.6],
-              opacity: [1, 0],
-              ease: 'outQuart',
-              duration: 500
-            });
-          }
-
-          // Eliminar las marcas residuales totalmente del render árbol tras la evaporación de frames visuales
-          setTimeout(() => {
-            this.activeAnimations.update(arr => arr.filter(a => a.id !== anim.id));
-          }, 800);
-        }
-      });
-    }
+    requestAnimationFrame(attemptStart);
   }
 
   private getHostToRouterPath(host: string): string {
