@@ -176,24 +176,8 @@ interface NodePosition {
           <text x="515" y="367" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="var(--font-mono)">.100.3</text>
           <text x="515" y="381" text-anchor="middle" fill="#64748b" font-size="7" font-family="var(--font-mono)">Usuario</text>
         </g>
-        <!-- ═══ ANIMACIONES DE PAQUETES (Motor SuperVectorial JavaScript Nativo DOM 60fps) ═══ -->
-        @for (anim of activeAnimations(); track anim.id) {
-          <g style="pointer-events: none;">
-            
-            <!-- El paquete móvil (renderizado inicialmente escondido lejos) -->
-            <circle [attr.id]="'pkg-' + anim.id" cx="-1000" cy="-1000" r="10" [attr.fill]="anim.color" />
-            
-            <!-- Explosión (Éxito) -->
-            <circle [attr.id]="'exp-' + anim.id" [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" 
-                    fill="none" [attr.stroke]="anim.color" r="5" stroke-width="4" opacity="0" />
-
-            <!-- Aspa de firewall (Drop/Reject) -->
-            <g [attr.id]="'drop-' + anim.id" [attr.transform]="'translate(' + anim.targetX + ',' + anim.targetY + ') scale(0)'" opacity="0">
-                 <line x1="-15" y1="-15" x2="15" y2="15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
-                 <line x1="-15" y1="15" x2="15" y2="-15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
-            </g>
-          </g>
-        }
+        <!-- ═══ CAPA NATIVA DE ANIMACION (Vanilla DOM puro) ═══ -->
+        <g id="animation-layer" style="pointer-events: none;"></g>
 
       </svg>
 
@@ -278,15 +262,6 @@ export class NetworkDiagramComponent {
   /** Nodo actualmente seleccionado */
   readonly selectedNode = signal<string | null>(null);
   
-  /** Lista de animaciones SVG activas */
-  readonly activeAnimations = signal<{
-    id: string,
-    color: string,
-    isDrop: boolean,
-    targetX: number,
-    targetY: number,
-  }[]>([]);
-
   private animationBus = inject(AnimationBusService);
   private destroyRef = inject(DestroyRef);
 
@@ -365,7 +340,8 @@ export class NetworkDiagramComponent {
 
     // Calcular longitud exacta
     let pathLength = 500;
-    const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const tempPath = document.createElementNS(SVG_NS, 'path');
     try {
       tempPath.setAttribute('d', pathString);
       pathLength = tempPath.getTotalLength();
@@ -374,75 +350,103 @@ export class NetworkDiagramComponent {
     // ¡Aumentamos drásticamente el tiempo de viaje para asegurar que el usuario LO VEA!
     const travelMs = Math.max(isDrop ? 1200 : 2000, Math.floor(pathLength * 4.5));
 
-    // Generar ID único
-    const animId = `anim_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-    const newAnim = { id: animId, color, isDrop, targetX, targetY };
+    // INYECCIÓN NATIVA AL DOM (100% libre de retrasos de ChangeDetection)
+    const layer = document.getElementById('animation-layer');
+    if (!layer) return;
+
+    const group = document.createElementNS(SVG_NS, 'g');
     
-    // Inyectar en el array
-    this.activeAnimations.update(arr => [...arr, newAnim]);
+    // Paquete
+    const pkgEl = document.createElementNS(SVG_NS, 'circle');
+    pkgEl.setAttribute('r', '10');
+    pkgEl.setAttribute('fill', color);
+    pkgEl.setAttribute('opacity', '1');
+    group.appendChild(pkgEl);
 
-    // Usar RequestAnimationFrame directo al DOM para saltarnos posibles bloqueos de change detection de Angular
-    setTimeout(() => {
-      let startTime: number | null = null;
-      let phase = 'moving'; // 'moving' -> 'effect'
+    // Efecto de Explosión (Accept) u Drop (Cruz)
+    const effectEl = document.createElementNS(SVG_NS, isDrop ? 'g' : 'circle');
+    if (isDrop) {
+      effectEl.setAttribute('opacity', '0');
       
-      const animateFrame = (timestamp: number) => {
-        if (!startTime) startTime = timestamp;
-        const elapsed = timestamp - startTime;
+      const line1 = document.createElementNS(SVG_NS, 'line');
+      line1.setAttribute('x1', '-15'); line1.setAttribute('y1', '-15');
+      line1.setAttribute('x2', '15'); line1.setAttribute('y2', '15');
+      line1.setAttribute('stroke', color); line1.setAttribute('stroke-width', '4'); line1.setAttribute('stroke-linecap', 'round');
+      
+      const line2 = document.createElementNS(SVG_NS, 'line');
+      line2.setAttribute('x1', '-15'); line2.setAttribute('y1', '15');
+      line2.setAttribute('x2', '15'); line2.setAttribute('y2', '-15');
+      line2.setAttribute('stroke', color); line2.setAttribute('stroke-width', '4'); line2.setAttribute('stroke-linecap', 'round');
+      
+      effectEl.appendChild(line1);
+      effectEl.appendChild(line2);
+    } else {
+      effectEl.setAttribute('cx', targetX.toString());
+      effectEl.setAttribute('cy', targetY.toString());
+      effectEl.setAttribute('fill', 'none');
+      effectEl.setAttribute('stroke', color);
+      effectEl.setAttribute('stroke-width', '4');
+      effectEl.setAttribute('r', '5');
+      effectEl.setAttribute('opacity', '0');
+    }
+    group.appendChild(effectEl);
+
+    // Adjuntar a la capa general
+    layer.appendChild(group);
+
+    // Motor rAF
+    let startTime: number | null = null;
+    let phase = 'moving'; // 'moving' -> 'effect'
+    
+    const animateFrame = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      
+      if (phase === 'moving') {
+        const progress = Math.min(elapsed / travelMs, 1);
         
-        const pkgEl = document.getElementById('pkg-' + animId);
-        const expEl = document.getElementById('exp-' + animId);
-        const dropEl = document.getElementById('drop-' + animId);
+        try {
+          const pt = tempPath.getPointAtLength(progress * pathLength);
+          pkgEl.setAttribute('cx', pt.x.toString());
+          pkgEl.setAttribute('cy', pt.y.toString());
+        } catch (e) {}
 
-        if (phase === 'moving') {
-          const progress = Math.min(elapsed / travelMs, 1);
-          
-          if (pkgEl) {
-            try {
-              const pt = tempPath.getPointAtLength(progress * pathLength);
-              // Setear coordenadas a piñón para máxima velocidad y seguridad en GPU
-              pkgEl.setAttribute('cx', pt.x.toString());
-              pkgEl.setAttribute('cy', pt.y.toString());
-              pkgEl.setAttribute('opacity', '1');
-            } catch (e) {}
-          }
-
-          if (progress < 1) {
-            requestAnimationFrame(animateFrame);
-          } else {
-            // Fin del viaje, ocultamos paquete y disparamos fase 2
-            if (pkgEl) pkgEl.setAttribute('opacity', '0');
-            startTime = timestamp; 
-            phase = 'effect';
-            requestAnimationFrame(animateFrame);
-          }
-        } 
-        else if (phase === 'effect') {
-          const effectProgress = Math.min(elapsed / 800, 1); // 800ms para efecto disparo
-          const fadeOut = 1 - effectProgress;
-          
-          if (!isDrop && expEl) {
-             const r = 5 + (45 * effectProgress);
-             expEl.setAttribute('r', r.toString());
-             expEl.setAttribute('opacity', fadeOut.toString());
-          } 
-          else if (isDrop && dropEl) {
-             const scale = 0.2 + (1.4 * effectProgress);
-             dropEl.setAttribute('transform', `translate(${targetX},${targetY}) scale(${scale})`);
-             dropEl.setAttribute('opacity', fadeOut.toString());
-          }
-
-          if (effectProgress < 1) {
-            requestAnimationFrame(animateFrame);
-          } else {
-            // Completado absoluto
-            this.activeAnimations.update(arr => arr.filter(a => a.id !== animId));
-          }
+        if (progress < 1) {
+          requestAnimationFrame(animateFrame);
+        } else {
+          // Fin del viaje, ocultar paquete y disparamos fase 2
+          pkgEl.setAttribute('opacity', '0');
+          startTime = timestamp; 
+          phase = 'effect';
+          requestAnimationFrame(animateFrame);
         }
-      };
+      } 
+      else if (phase === 'effect') {
+        const effectProgress = Math.min(elapsed / 800, 1); // 800ms para efecto disparo
+        const fadeOut = (1 - effectProgress).toString();
+        
+        if (!isDrop) {
+           const r = 5 + (45 * effectProgress);
+           effectEl.setAttribute('r', r.toString());
+           effectEl.setAttribute('opacity', fadeOut);
+        } 
+        else {
+           const scale = 0.2 + (1.4 * effectProgress);
+           effectEl.setAttribute('transform', `translate(${targetX},${targetY}) scale(${scale})`);
+           effectEl.setAttribute('opacity', fadeOut);
+        }
 
-      requestAnimationFrame(animateFrame);
-    }, 50); // Dar 50ms a Angular para pintar los nodos SVG
+        if (effectProgress < 1) {
+          requestAnimationFrame(animateFrame);
+        } else {
+          // Completado absoluto: Eliminar rastro del DOM
+          group.remove();
+        }
+      }
+    };
+
+    // Arracar
+    requestAnimationFrame(animateFrame);
   }
 
   private getHostToRouterPath(host: string): string {
