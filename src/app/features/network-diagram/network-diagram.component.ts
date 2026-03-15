@@ -1,18 +1,11 @@
-import { Component, signal, computed, input, effect } from '@angular/core';
+import { Component, signal, computed, effect, inject } from '@angular/core';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
+import { AnimationBusService, PacketAnimation } from '../../core/services/animation-bus.service';
 
 interface NodePosition {
   x: number;
   y: number;
-}
-
-export interface PacketAnimation {
-  id: number;
-  source: string;
-  dest: string;
-  verdict: string;
-  protocol: string;
 }
 
 @Component({
@@ -298,16 +291,15 @@ export class NetworkDiagramComponent {
 
   /** Nodo actualmente seleccionado */
   readonly selectedNode = signal<string | null>(null);
-
-  /** Entradas para animar paquetes */
-  readonly packetAnimation = input<PacketAnimation | null>(null);
   
   /** Lista de animaciones SVG activas */
   readonly activeAnimations = signal<{id: number, path: string, color: string, isDrop: boolean, dur: string}[]>([]);
 
+  private animationBus = inject(AnimationBusService);
+
   constructor() {
     effect(() => {
-      const anim = this.packetAnimation();
+      const anim = this.animationBus.animationSignal();
       if (anim) {
         this.triggerAnimation(anim);
       }
