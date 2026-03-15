@@ -87,7 +87,7 @@ export class App {
   /** Estado global de la UI */
   protected readonly showReference = signal(true);
   protected readonly showChallenges = signal(false);
-  protected readonly editorContent = signal('');
+  protected readonly editorContent = signal('nft add table inet filter\nnft add chain inet filter forward { type filter hook forward priority 0 ; policy drop ; }\nnft add rule inet filter forward ip saddr 192.168.100.50 tcp dport 80 accept');
 
   /** Servicios de Simulación */
   private readonly parser = inject(NftablesParserService);
