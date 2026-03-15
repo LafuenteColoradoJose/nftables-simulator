@@ -20,10 +20,15 @@ import { Component, output } from '@angular/core';
         <!-- Separador -->
         <div class="hidden sm:block w-px h-6 bg-border-default" aria-hidden="true"></div>
 
-        <!-- Subtítulo -->
-        <p class="hidden sm:block text-xs text-text-muted">
-          Simulador de firewall Linux
-        </p>
+        <!-- Subtítulo y Enlace al creador -->
+        <div class="hidden sm:flex items-center gap-2">
+          <p class="text-xs text-text-muted">Simulador de firewall Linux</p>
+          <span class="text-text-muted/50 text-xs">•</span>
+          <a href="https://www.joselafuente.dev/" target="_blank" rel="noopener noreferrer" 
+             class="text-xs text-text-muted hover:text-accent-cyan transition-colors duration-200">
+            por <span class="font-medium text-text-secondary">José Lafuente</span>
+          </a>
+        </div>
       </div>
 
       <nav class="flex items-center gap-1" aria-label="Acciones principales">
