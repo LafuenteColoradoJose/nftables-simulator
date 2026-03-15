@@ -213,7 +213,7 @@ interface NodePosition {
                <g [style.transform]="'translate(' + anim.targetX + 'px, ' + anim.targetY + 'px)'">
                  <g style="opacity: 0; animation: crossAnim 500ms ease-out forwards;" [style.animation-delay.ms]="anim.travelMs">
                    <line x1="-15" y1="-15" x2="15" y2="15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
-                   <line x1="-15" y1="15" x2="15" y2="-15" [attr.attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
+                   <line x1="-15" y1="15" x2="15" y2="-15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
                  </g>
                </g>
             }
