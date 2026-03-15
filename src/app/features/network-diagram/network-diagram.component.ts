@@ -180,7 +180,7 @@ interface NodePosition {
         @for (anim of activeAnimations(); track anim.id) {
           <g>
             <!-- Paquete en movimiento -->
-            <circle r="5" [attr.fill]="anim.color" filter="url(#glow)">
+            <circle r="7" [attr.fill]="anim.color" filter="url(#glow)">
               <animateMotion 
                 [attr.path]="anim.path" 
                 [attr.dur]="anim.dur" 
@@ -190,20 +190,20 @@ interface NodePosition {
               <animate 
                 attributeName="opacity" 
                 values="1;1;0" 
-                keyTimes="0;0.95;1" 
+                keyTimes="0;0.9;1" 
                 [attr.dur]="anim.dur" 
                 fill="freeze" 
               />
             </circle>
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
-            <circle r="5" fill="none" [attr.stroke]="anim.color" stroke-width="2" filter="url(#glow)">
+            <circle r="7" fill="none" [attr.stroke]="anim.color" stroke-width="2.5" filter="url(#glow)">
               <animateMotion [attr.path]="anim.path" [attr.dur]="anim.dur" fill="freeze" calcMode="linear"/>
-              <animate attributeName="opacity" values="0;0;0.8;0" keyTimes="0;0.9;0.95;1" [attr.dur]="anim.dur" fill="freeze" />
-              <animate attributeName="r" [attr.values]="anim.isDrop ? '5;5;20;25' : '5;5;12;16'" keyTimes="0;0.9;0.95;1" [attr.dur]="anim.dur" fill="freeze" />
+              <animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.8;0.9;1" [attr.dur]="anim.dur" fill="freeze" />
+              <animate attributeName="r" [attr.values]="anim.isDrop ? '7;7;25;35' : '7;7;15;22'" keyTimes="0;0.8;0.9;1" [attr.dur]="anim.dur" fill="freeze" />
               @if (anim.isDrop) {
-                 <!-- Si lo tira el firewall, pintamos un tache -->
-                 <animate attributeName="stroke-dasharray" values="100;100;4 4;2 6" keyTimes="0;0.9;0.95;1" [attr.dur]="anim.dur" fill="freeze" />
+                 <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
+                 <animate attributeName="stroke-dasharray" values="100;100;6 6;2 10" keyTimes="0;0.8;0.9;1" [attr.dur]="anim.dur" fill="freeze" />
               }
             </circle>
           </g>
