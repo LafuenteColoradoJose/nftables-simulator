@@ -176,38 +176,47 @@ interface NodePosition {
           <text x="515" y="367" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="var(--font-mono)">.100.3</text>
           <text x="515" y="381" text-anchor="middle" fill="#64748b" font-size="7" font-family="var(--font-mono)">Usuario</text>
         </g>
+        <style>
+          .trace-packet {
+            stroke-dasharray: 4 1500;
+            animation: tracePath linear both;
+          }
+          @keyframes tracePath {
+            0% { stroke-dashoffset: 0; opacity: 1; }
+            95% { stroke-dashoffset: -100; opacity: 1; }
+            100% { stroke-dashoffset: -100; opacity: 0; }
+          }
+          @keyframes explodeAnim {
+            0% { r: 5px; opacity: 1; stroke-width: 4px; }
+            100% { r: 40px; opacity: 0; stroke-width: 1px; }
+          }
+          @keyframes crossAnim {
+            0% { opacity: 1; transform: scale(0.2); }
+            100% { opacity: 0; transform: scale(1.6); }
+          }
+        </style>
+
         <!-- ═══ ANIMACIONES DE PAQUETES ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
           <g>
             <!-- Paquete en movimiento -->
-            <circle r="7" [attr.fill]="anim.color">
-              <animateMotion 
-                [attr.path]="anim.path" 
-                [attr.dur]="anim.dur" 
-                begin="0s"
-                fill="freeze"
-                calcMode="linear"
-              />
-              <animate 
-                attributeName="opacity" 
-                values="1;1;0" 
-                keyTimes="0;0.9;1" 
-                [attr.dur]="anim.dur" 
-                begin="0s"
-                fill="freeze" 
-              />
-            </circle>
+            <path [attr.d]="anim.path" pathLength="100" fill="none" [attr.stroke]="anim.color" stroke-width="8" stroke-linecap="round"
+                  class="trace-packet" [style.animation-duration.ms]="anim.travelMs" />
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
-            <circle r="7" fill="none" [attr.stroke]="anim.color" stroke-width="2.5">
-              <animateMotion [attr.path]="anim.path" [attr.dur]="anim.dur" begin="0s" fill="freeze" calcMode="linear"/>
-              <animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.8;0.9;1" [attr.dur]="anim.dur" begin="0s" fill="freeze" />
-              <animate attributeName="r" [attr.values]="anim.isDrop ? '7;7;25;35' : '7;7;15;22'" keyTimes="0;0.8;0.9;1" [attr.dur]="anim.dur" begin="0s" fill="freeze" />
-              @if (anim.isDrop) {
-                 <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
-                 <animate attributeName="stroke-dasharray" values="100;100;6 6;2 10" keyTimes="0;0.8;0.9;1" [attr.dur]="anim.dur" begin="0s" fill="freeze" />
-              }
-            </circle>
+            <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color"
+                    style="opacity: 0; animation: explodeAnim 500ms ease-out forwards;"
+                    [style.animation-delay.ms]="anim.travelMs" />
+
+            @if (anim.isDrop) {
+               <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
+               <g [style.transform]="'translate(' + anim.targetX + 'px, ' + anim.targetY + 'px)'">
+                 <g style="opacity: 0; animation: crossAnim 500ms ease-out forwards;" [style.animation-delay.ms]="anim.travelMs">
+                   <line x1="-15" y1="-15" x2="15" y2="15" [attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
+                   <line x1="-15" y1="15" x2="15" y2="-15" [attr.attr.stroke]="anim.color" stroke-width="4" stroke-linecap="round"/>
+                 </g>
+               </g>
+            }
           </g>
         }
 
@@ -295,7 +304,15 @@ export class NetworkDiagramComponent {
   readonly selectedNode = signal<string | null>(null);
   
   /** Lista de animaciones SVG activas */
-  readonly activeAnimations = signal<{id: number, path: string, color: string, isDrop: boolean, dur: string}[]>([]);
+  readonly activeAnimations = signal<{
+    id: number,
+    path: string,
+    color: string,
+    isDrop: boolean,
+    travelMs: number,
+    targetX: number,
+    targetY: number
+  }[]>([]);
 
   private animationBus = inject(AnimationBusService);
   private destroyRef = inject(DestroyRef);
@@ -354,11 +371,11 @@ export class NetworkDiagramComponent {
     this.selectedNode.set(this.selectedNode() === id ? null : id);
   }
 
-  /** Función para inyectar una nueva animación en el ecosistema SVG */
+  /** Función para inyectar una nueva animación en el ecosistema SVG usando CSS puro */
   private triggerAnimation(anim: PacketAnimation) {
     const isDrop = anim.verdict === 'drop' || anim.verdict === 'reject';
     const color = anim.verdict === 'accept' ? '#34d399' : '#f87171'; // Verde si accept, Rojo si drop/reject
-    const dur = isDrop ? '0.6s' : '1.2s'; // Cae rápido si es router, tarda si viaja
+    const travelMs = isDrop ? 600 : 1200; // Cae rápido si es router, tarda si viaja
     
     let path = this.getHostToRouterPath(anim.source);
     
@@ -369,15 +386,20 @@ export class NetworkDiagramComponent {
       path += ' ' + destPath.replace('M 300 125 ', '');
     }
 
-    const newAnim = { id: anim.id, path, color, isDrop, dur };
+    // Extraer coordenadas finales directamente del final del string del path!
+    const parts = path.trim().split(/\s+/);
+    const targetY = parseFloat(parts.pop() || '0');
+    const targetX = parseFloat(parts.pop() || '0');
+
+    const newAnim = { id: anim.id, path, color, isDrop, travelMs, targetX, targetY };
     
     // Añadir al SVG
     this.activeAnimations.update(arr => [...arr, newAnim]);
 
-    // Limpiarlo del DOM después de que termine la animación
+    // Limpiarlo del DOM después de que termine todo (viaje + explosión)
     setTimeout(() => {
       this.activeAnimations.update(arr => arr.filter(a => a.id !== newAnim.id));
-    }, isDrop ? 1000 : 1500);
+    }, travelMs + 700);
   }
 
   private getHostToRouterPath(host: string): string {
