@@ -1,7 +1,7 @@
 import { Component, signal, viewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NavbarComponent } from './layout/navbar.component';
-import { NetworkDiagramComponent } from './features/network-diagram/network-diagram.component';
+import { NetworkDiagramComponent, PacketAnimation } from './features/network-diagram/network-diagram.component';
 import { RuleEditorComponent } from './features/rule-editor/rule-editor.component';
 import { PacketTesterComponent, PacketConfig } from './features/packet-tester/packet-tester.component';
 import { ResultLogComponent, LogEntry } from './features/result-log/result-log.component';
@@ -39,7 +39,7 @@ import { SimulatedPacket } from './core/models/nftables.model';
         <main class="flex-1 flex flex-col overflow-hidden min-w-0">
           <!-- Fila superior: Diagrama de red -->
           <section class="flex-1 min-h-0 border-b border-border-default">
-            <app-network-diagram />
+            <app-network-diagram [packetAnimation]="packetAnimation()" />
           </section>
 
           <!-- Fila inferior: Editor + Tester + Log -->
@@ -87,6 +87,7 @@ export class App {
   protected readonly showReference = signal(true);
   protected readonly showChallenges = signal(false);
   protected readonly editorContent = signal('');
+  protected readonly packetAnimation = signal<PacketAnimation | null>(null);
 
   /** Servicios de Simulación */
   private readonly parser = inject(NftablesParserService);
@@ -189,5 +190,14 @@ export class App {
     };
 
     this.resultLog()?.addEntry(entry);
+
+    // Animación visual
+    this.packetAnimation.set({
+      id: Date.now(),
+      source: packet.source,
+      dest: packet.destination,
+      verdict: evalResult.finalVerdict,
+      protocol: packet.protocol
+    });
   }
 }

@@ -1,10 +1,18 @@
-import { Component, signal, computed } from '@angular/core';
+import { Component, signal, computed, input, effect } from '@angular/core';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
 
 interface NodePosition {
   x: number;
   y: number;
+}
+
+export interface PacketAnimation {
+  id: number;
+  source: string;
+  dest: string;
+  verdict: string;
+  protocol: string;
 }
 
 @Component({
@@ -175,6 +183,39 @@ interface NodePosition {
           <text x="515" y="367" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="var(--font-mono)">.100.3</text>
           <text x="515" y="381" text-anchor="middle" fill="#64748b" font-size="7" font-family="var(--font-mono)">Usuario</text>
         </g>
+        <!-- ═══ ANIMACIONES DE PAQUETES ═══ -->
+        @for (anim of activeAnimations(); track anim.id) {
+          <g>
+            <!-- Paquete en movimiento -->
+            <circle r="5" [attr.fill]="anim.color" filter="url(#glow)">
+              <animateMotion 
+                [attr.path]="anim.path" 
+                [attr.dur]="anim.dur" 
+                fill="freeze"
+                calcMode="linear"
+              />
+              <animate 
+                attributeName="opacity" 
+                values="1;1;0" 
+                keyTimes="0;0.95;1" 
+                [attr.dur]="anim.dur" 
+                fill="freeze" 
+              />
+            </circle>
+
+            <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
+            <circle r="5" fill="none" [attr.stroke]="anim.color" stroke-width="2" filter="url(#glow)">
+              <animateMotion [attr.path]="anim.path" [attr.dur]="anim.dur" fill="freeze" calcMode="linear"/>
+              <animate attributeName="opacity" values="0;0;0.8;0" keyTimes="0;0.9;0.95;1" [attr.dur]="anim.dur" fill="freeze" />
+              <animate attributeName="r" [attr.values]="anim.isDrop ? '5;5;20;25' : '5;5;12;16'" keyTimes="0;0.9;0.95;1" [attr.dur]="anim.dur" fill="freeze" />
+              @if (anim.isDrop) {
+                 <!-- Si lo tira el firewall, pintamos un tache -->
+                 <animate attributeName="stroke-dasharray" values="100;100;4 4;2 6" keyTimes="0;0.9;0.95;1" [attr.dur]="anim.dur" fill="freeze" />
+              }
+            </circle>
+          </g>
+        }
+
       </svg>
 
       <!-- ═══ PANEL DE INFO DEL NODO SELECCIONADO ═══ -->
@@ -258,6 +299,21 @@ export class NetworkDiagramComponent {
   /** Nodo actualmente seleccionado */
   readonly selectedNode = signal<string | null>(null);
 
+  /** Entradas para animar paquetes */
+  readonly packetAnimation = input<PacketAnimation | null>(null);
+  
+  /** Lista de animaciones SVG activas */
+  readonly activeAnimations = signal<{id: number, path: string, color: string, isDrop: boolean, dur: string}[]>([]);
+
+  constructor() {
+    effect(() => {
+      const anim = this.packetAnimation();
+      if (anim) {
+        this.triggerAnimation(anim);
+      }
+    });
+  }
+
   /** Información del nodo seleccionado */
   readonly selectedNodeInfo = computed(() => {
     const id = this.selectedNode();
@@ -303,5 +359,53 @@ export class NetworkDiagramComponent {
 
   selectNode(id: string | null): void {
     this.selectedNode.set(this.selectedNode() === id ? null : id);
+  }
+
+  /** Función para inyectar una nueva animación en el ecosistema SVG */
+  private triggerAnimation(anim: PacketAnimation) {
+    const isDrop = anim.verdict === 'drop' || anim.verdict === 'reject';
+    const color = anim.verdict === 'accept' ? '#34d399' : '#f87171'; // Verde si accept, Rojo si drop/reject
+    const dur = isDrop ? '0.6s' : '1.2s'; // Cae rápido si es router, tarda si viaja
+    
+    let path = this.getHostToRouterPath(anim.source);
+    
+    // Si isDrop es falso y dest no es router, agregamos el path hacia el destino
+    if (!isDrop && anim.dest !== 'router') {
+      const destPath = this.getRouterToHostPath(anim.dest);
+      // Evitamos el salto borrando el move inicial del segundo path
+      path += ' ' + destPath.replace('M 300 125 ', '');
+    }
+
+    const newAnim = { id: anim.id, path, color, isDrop, dur };
+    
+    // Añadir al SVG
+    this.activeAnimations.update(arr => [...arr, newAnim]);
+
+    // Limpiarlo del DOM después de que termine la animación
+    setTimeout(() => {
+      this.activeAnimations.update(arr => arr.filter(a => a.id !== newAnim.id));
+    }, isDrop ? 1000 : 1500);
+  }
+
+  private getHostToRouterPath(host: string): string {
+    switch(host) {
+      case 'internet': return 'M 300 55 L 300 100 L 300 125';
+      case 'apache': return 'M 117 310 L 117 285 L 117 265 Q 200 185 260 155 L 300 125';
+      case 'admin': return 'M 315 310 L 415 285 L 415 265 Q 380 185 340 155 L 300 125';
+      case 'empleado1': return 'M 415 310 L 415 285 L 415 265 Q 380 185 340 155 L 300 125';
+      case 'empleado2': return 'M 515 310 L 415 285 L 415 265 Q 380 185 340 155 L 300 125';
+      default: return 'M 300 125 L 300 125';
+    }
+  }
+
+  private getRouterToHostPath(host: string): string {
+    switch(host) {
+      case 'internet': return 'M 300 125 L 300 100 L 300 55';
+      case 'apache': return 'M 300 125 L 260 155 Q 200 185 117 265 L 117 285 L 117 310';
+      case 'admin': return 'M 300 125 L 340 155 Q 380 185 415 265 L 415 285 L 315 310';
+      case 'empleado1': return 'M 300 125 L 340 155 Q 380 185 415 265 L 415 285 L 415 310';
+      case 'empleado2': return 'M 300 125 L 340 155 Q 380 185 415 265 L 415 285 L 515 310';
+      default: return 'M 300 125 L 300 125';
+    }
   }
 }
