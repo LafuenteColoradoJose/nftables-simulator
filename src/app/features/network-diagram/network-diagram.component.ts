@@ -1,4 +1,4 @@
-import { Component, signal, computed, effect, inject } from '@angular/core';
+import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
 import { ROUTER_CONFIG, NETWORK_HOSTS, NETWORK_SEGMENTS } from '../../core/data/topology.data';
 import { NetworkHost, RouterConfig, NetworkSegment } from '../../core/models/network.model';
 import { AnimationBusService, PacketAnimation } from '../../core/services/animation-bus.service';
@@ -298,14 +298,13 @@ export class NetworkDiagramComponent {
   readonly activeAnimations = signal<{id: number, path: string, color: string, isDrop: boolean, dur: string}[]>([]);
 
   private animationBus = inject(AnimationBusService);
+  private destroyRef = inject(DestroyRef);
 
   constructor() {
-    effect(() => {
-      const anim = this.animationBus.animationSignal();
-      if (anim) {
-        this.triggerAnimation(anim);
-      }
+    const sub = this.animationBus.animation$.subscribe(anim => {
+      this.triggerAnimation(anim);
     });
+    this.destroyRef.onDestroy(() => sub.unsubscribe());
   }
 
   /** Información del nodo seleccionado */

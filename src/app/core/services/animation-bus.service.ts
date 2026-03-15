@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable } from '@angular/core';
+import { Subject } from 'rxjs';
 
 export interface PacketAnimation {
   id: number;
@@ -10,20 +11,16 @@ export interface PacketAnimation {
 
 @Injectable({ providedIn: 'root' })
 export class AnimationBusService {
-  readonly animationSignal = signal<PacketAnimation | null>(null);
+  private animationSubject = new Subject<PacketAnimation>();
+  readonly animation$ = this.animationSubject.asObservable();
 
   emitAnimation(source: string, dest: string, verdict: string, protocol: string) {
-    this.animationSignal.set(null); // Force signal update even if object is similar
-    
-    // Adding a tiny tick to ensure change detection catches the rapid set if using `effect`
-    setTimeout(() => {
-        this.animationSignal.set({
-          id: Date.now() + Math.random(),
-          source,
-          dest,
-          verdict,
-          protocol
-        });
-    }, 10);
+    this.animationSubject.next({
+      id: Date.now() + Math.random(),
+      source,
+      dest,
+      verdict,
+      protocol
+    });
   }
 }
