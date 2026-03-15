@@ -6,6 +6,7 @@ import { RuleEditorComponent } from './features/rule-editor/rule-editor.componen
 import { PacketTesterComponent, PacketConfig } from './features/packet-tester/packet-tester.component';
 import { ResultLogComponent, LogEntry } from './features/result-log/result-log.component';
 import { ReferenceSidebarComponent } from './layout/reference-sidebar.component';
+import { ChallengeSidebarComponent } from './features/challenges/challenge-sidebar.component';
 import { NETWORK_HOSTS } from './core/data/topology.data';
 import { NftablesParserService } from './core/services/nftables-parser.service';
 import { SimulationEngineService } from './core/services/simulation-engine.service';
@@ -21,6 +22,7 @@ import { SimulatedPacket } from './core/models/nftables.model';
     PacketTesterComponent,
     ResultLogComponent,
     ReferenceSidebarComponent,
+    ChallengeSidebarComponent
   ],
   template: `
     <div class="flex flex-col h-dvh overflow-hidden bg-bg-primary">
@@ -59,10 +61,15 @@ import { SimulatedPacket } from './core/models/nftables.model';
           </section>
         </main>
 
-        <!-- Sidebar: Referencia rápida -->
-        @if (showReference()) {
-          <div class="w-72 shrink-0 overflow-hidden">
-            <app-reference-sidebar />
+        <!-- Sidebar: Referencia rápida o Retos -->
+        @if (showReference() || showChallenges()) {
+          <div class="w-80 shrink-0 overflow-hidden border-l border-border-default h-full bg-bg-secondary flex flex-col">
+            @if (showReference()) {
+              <app-reference-sidebar class="flex-1 overflow-hidden" />
+            }
+            @if (showChallenges()) {
+              <app-challenge-sidebar class="flex-1 overflow-hidden" (loadInitialRules)="onLoadChallengeRules($event)" />
+            }
           </div>
         }
       </div>
@@ -90,16 +97,33 @@ export class App {
 
   /** Acciones de la navbar */
   protected toggleReference(): void {
-    this.showReference.update(v => !v);
+    if (!this.showReference()) {
+      this.showChallenges.set(false);
+      this.showReference.set(true);
+    } else {
+      this.showReference.set(false);
+    }
   }
 
   protected toggleChallenges(): void {
-    this.showChallenges.update(v => !v);
+    if (!this.showChallenges()) {
+      this.showReference.set(false);
+      this.showChallenges.set(true);
+    } else {
+      this.showChallenges.set(false);
+    }
   }
 
   protected resetSimulator(): void {
     this.editorContent.set('');
     this.resultLog()?.clearLog();
+    // Parse empty ruleset to clear engine
+    this.onApplyRules('');
+  }
+
+  protected onLoadChallengeRules(rules: string): void {
+    this.editorContent.set(rules);
+    this.onApplyRules(rules);
   }
 
   /** Aplicar reglas del editor */
