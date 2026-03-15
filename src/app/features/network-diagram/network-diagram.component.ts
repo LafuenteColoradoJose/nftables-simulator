@@ -178,9 +178,9 @@ interface NodePosition {
         </g>
         <!-- ═══ ANIMACIONES DE PAQUETES (SVG SMIL explícito para máxima compatibilidad SPA) ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
-          <g>
+          <g style="pointer-events: none;">
             <!-- Paquete en movimiento nativo SVG dictado por coordenadas -->
-            <circle [attr.id]="'packet-' + anim.id" cx="0" cy="0" r="7" [attr.fill]="anim.color" style="opacity: 0; pointer-events: none;">
+            <circle [attr.id]="'packet-' + anim.id" cx="0" cy="0" r="7" [attr.fill]="anim.color" opacity="0">
               <animateMotion 
                 [attr.id]="'motion-' + anim.id"
                 [attr.path]="anim.path" 
@@ -201,7 +201,7 @@ interface NodePosition {
             </circle>
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
-            <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" style="opacity: 0; pointer-events: none;">
+            <circle [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" opacity="0">
               <animate 
                 [attr.id]="'explodeFade-' + anim.id"
                 attributeName="opacity" 
@@ -231,7 +231,7 @@ interface NodePosition {
 
             @if (anim.isDrop) {
                <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
-               <g [attr.transform]="'translate(' + anim.targetX + ',' + anim.targetY + ')'" style="opacity: 0; pointer-events: none;">
+               <g [attr.transform]="'translate(' + anim.targetX + ',' + anim.targetY + ')'" opacity="0">
                  <animate 
                    [attr.id]="'crossFade-' + anim.id"
                    attributeName="opacity" 
