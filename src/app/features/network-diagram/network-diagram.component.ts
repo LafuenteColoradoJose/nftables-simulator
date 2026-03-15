@@ -180,11 +180,14 @@ interface NodePosition {
         <!-- ═══ ANIMACIONES DE PAQUETES (Controlado directamente con Anime.js) ═══ -->
         @for (anim of activeAnimations(); track anim.id) {
           <g>
+            <!-- Ruta invisible en el DOM necesaria para que anime.js mida la longitud y coordenads exactas -->
+            <path [attr.id]="'path-' + anim.id" [attr.d]="anim.path" fill="none" stroke="none" />
+
             <!-- Paquete en movimiento renderizado en 0,0 y manejado en transform nativamente por GPU a 60fps -->
-            <circle [attr.id]="'packet-' + anim.id" r="7" [attr.fill]="anim.color" style="opacity: 0;" />
+            <circle [attr.id]="'packet-' + anim.id" r="7" [attr.fill]="anim.color" style="opacity: 0; pointer-events: none;" />
 
             <!-- Expansión al finalizar (Explosión red o onda de éxito) -->
-            <circle [attr.id]="'explode-' + anim.id" [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" style="opacity: 0;" />
+            <circle [attr.id]="'explode-' + anim.id" [attr.cx]="anim.targetX" [attr.cy]="anim.targetY" fill="none" [attr.stroke]="anim.color" style="opacity: 0; pointer-events: none;" />
 
             @if (anim.isDrop) {
                <!-- Si lo tira el firewall, pintamos unas aspas tachadas grandes -->
@@ -283,11 +286,10 @@ export class NetworkDiagramComponent {
   
   /** Lista de animaciones SVG activas */
   readonly activeAnimations = signal<{
-    id: number,
+    id: string,
     path: string,
     color: string,
     isDrop: boolean,
-    travelMs: number,
     targetX: number,
     targetY: number,
     offset: WritableSignal<number>
@@ -369,49 +371,52 @@ export class NetworkDiagramComponent {
     const targetY = parseFloat(parts.pop() || '0');
     const targetX = parseFloat(parts.pop() || '0');
 
-    // Calcular longitud exacta del path
-    let pathLength = 500;
-    try {
-      const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      tempPath.setAttribute('d', pathString);
-      pathLength = tempPath.getTotalLength();
-    } catch(e) {}
+    // Usar un string de ID amigable sin decimales (anim.id actual puede traer decimales en math.random)
+    const animId = `anim_${Date.now()}_${Math.floor(Math.random()*1000)}`;
 
-    const travelMs = Math.max(isDrop ? 600 : 1200, Math.floor(pathLength * 2.5));
-    
-    const newAnim = { id: anim.id, path: pathString, color, isDrop, travelMs, targetX, targetY, offset: signal(0) };
+    const newAnim = { id: animId, path: pathString, color, isDrop, targetX, targetY, offset: signal(0) };
     
     // Añadir al SVG (Angular dibujará el circulo con su atributo DOM id correspondiente)
     this.activeAnimations.update(arr => [...arr, newAnim]);
 
-    // Forzar un tick de render en el DOM para poder obtener los nodos exactos y aplicarles animeJS con máxima compatibilidad
-    setTimeout(() => {
-      this.runAnimeJs(newAnim);
-    }, 50);
+    // Usar un bucle rápido para esperar a que Angular inyecte los elementos en el DOM real
+    let retries = 0;
+    const attemptRender = () => {
+      if (document.getElementById('path-' + animId)) {
+        this.runAnimeJs(newAnim);
+      } else if (retries < 10) {
+        retries++;
+        requestAnimationFrame(attemptRender);
+      }
+    };
+    requestAnimationFrame(attemptRender);
   }
 
-  /** Motor visual superrobusto a 60fps usando anime.js y modificando propiedades básicas de DOM */
+  /** Motor visual superrobusto a 60fps usando anime.js y path real inyectado en DOM */
   private runAnimeJs(anim: any) {
     // Referencias a los contenedores
+    const pathEl = document.getElementById('path-' + anim.id) as SVGPathElement;
     const packetEl = document.getElementById('packet-' + anim.id);
     const explodeEl = document.getElementById('explode-' + anim.id);
     const crossEl = document.getElementById('cross-' + anim.id);
 
-    // Path temporal que dictará la trayectoria punto por punto
-    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pathEl.setAttribute('d', anim.path);
-    const animePath = anime.path(pathEl);
+    if (packetEl && pathEl) {
+      // Calcular duración real basada en la longitud física del path inyectado en DOM
+      let len = 500;
+      try { len = pathEl.getTotalLength(); } catch(e) {}
+      const travelMs = Math.max(anim.isDrop ? 600 : 1200, Math.floor(len * 2.5));
 
-    if (packetEl) {
       // Configurarlo visible antes de arrancar
       packetEl.style.opacity = '1';
+
+      const animePath = anime.path(pathEl);
 
       anime({
         targets: packetEl,
         translateX: animePath('x'),
         translateY: animePath('y'),
         easing: 'linear',
-        duration: anim.travelMs,
+        duration: travelMs,
         complete: () => {
           packetEl.style.opacity = '0'; // Se detiene
           
@@ -438,7 +443,7 @@ export class NetworkDiagramComponent {
             });
           }
 
-          // Eliminar las marcas residuales totalmente del render árbol tras la evaporación de frames visuales
+          // Eliminar las marcas residuales totalmente del render árbol 
           setTimeout(() => {
             this.activeAnimations.update(arr => arr.filter(a => a.id !== anim.id));
           }, 800);
